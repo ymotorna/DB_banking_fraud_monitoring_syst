@@ -181,4 +181,4 @@ INSERT transaction (status='pending', risk_score=0)
 ## Project Conversation
 
 > Full design walkthrough and seed data generation:
-> **[link]**
+> **[https://claude.ai/share/69ccb7ed-e859-4d81-aaf8-6f8c43c97c48]**
