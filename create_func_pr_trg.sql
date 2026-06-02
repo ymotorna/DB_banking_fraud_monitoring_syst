@@ -3,22 +3,19 @@
 -- +func
 ---------------------------------------------------------------------------------------------------------------------------
 
--- Calculate customer daily transaction volume
-create or replace function calculate_customer_daily_volume(
-    p_customer_id BIGINT,
-    p_target_date DATE)
-returns DECIMAL
+-- Mask card number
+-- +domain for 1111 1111 1111 1111 -> 1111 **** **** 1111 formatting
+create domain secure_card_number as VARCHAR
+check (value ~'^\d{4}\*{8}\d{4}$');
+
+create or replace function mask_card_number(p_card_number VARCHAR)
+returns secure_card_number
 language plpgsql AS $$
     BEGIN
-        return (
-            select sum(amount) as total_volume
-            from transactions t
-            join accounts a
-                on t.account_id = a.account_id
-            where a.customer_id = p_customer_id
-                and t.created_at::date = p_target_date);
+        return concat(left(p_card_number,4), '********', right(p_card_number,4));
     END;
     $$;
+
 
 
 
@@ -33,6 +30,40 @@ language plpgsql AS $$
             where country_code=p_country_code);
     END;
     $$;
+
+
+
+-- Get customer age
+create or replace function get_customer_age(p_customer_id BIGINT)
+returns INTEGER
+language plpgsql AS $$
+    BEGIN
+        return (select date_part('year', AGE(birth_date))::integer
+                from customers
+                where customer_id = p_customer_id);
+    END;
+    $$;
+
+
+
+-- Calculate customer daily transaction volume
+create or replace function calculate_customer_daily_volume(
+    p_customer_id BIGINT,
+    p_target_date DATE)
+returns DECIMAL
+language plpgsql AS $$
+    BEGIN
+        return (
+            select sum(amount) as total_volume
+            from transactions t
+            join accounts a
+                on t.account_id = a.account_id
+            where a.customer_id = p_customer_id
+                and t.created_at::date = p_target_date
+                and t.status='approved');
+    END;
+    $$;
+
 
 
 
@@ -65,32 +96,6 @@ language plpgsql AS $$
 
 
 
--- Mask card number
--- +domain for 1111 1111 1111 1111 -> 1111 **** **** 1111 formatting
-create domain secure_card_number as VARCHAR
-check (value ~'^\d{4}\*{8}\d{4}$');
-
-create or replace function mask_card_number(p_card_number VARCHAR)
-returns secure_card_number
-language plpgsql AS $$
-    BEGIN
-        return concat(left(p_card_number,4), '********', right(p_card_number,4));
-    END;
-    $$;
-
-
--- Get customer age
-create or replace function get_customer_age(p_customer_id BIGINT)
-returns INTEGER
-language plpgsql AS $$
-    BEGIN
-        return (select date_part('year', AGE(birth_date))::integer
-                from customers
-                where customer_id = p_customer_id);
-    END;
-    $$;
-
---
 
 
 
@@ -123,10 +128,13 @@ AS $$
         v_open_alerts INTEGER;
     BEGIN
         -- calc risk score
-        UPDATE transactions
-        set risk_score=calculate_transaction_risk_score(p_transaction_id)
-        where transaction_id=p_transaction_id
-        RETURNING risk_score into v_risk_score;
+        v_risk_score = calculate_transaction_risk_score(p_transaction_id);
+
+        if v_risk_score>0 then  -- to avoid UPDATE when nth to update
+            UPDATE transactions
+            set risk_score=v_risk_score
+            where transaction_id=p_transaction_id;
+        end if;
 
         -- check vals w/ thresholds in fraud_rules => call pr_create_fraud_alert on evr violation
 
@@ -303,35 +311,6 @@ AS $$
     END;
     $$;
 
---         -- +audit log
---         INSERT INTO audit_log (
---                                customer_id,
---                                table_name,
---                                operation,
---                                old_value,
---                                new_value,
---                                changed_at)
---         VALUES(
---                v_customer_id,
---                'cards',
---                'UPDATE',
---                json_build_object('status', v_account_status),
---                json_build_object('status', 'blocked'),
---                now()),
---
---                 (v_customer_id,
---                'accounts',
---                'UPDATE',
---                json_build_object('status', v_card_status),
---                json_build_object('status', 'suspended'),
---                now()),
---
---              (v_customer_id,
---                'transacions',
---                'UPDATE',
---                v_transaction_list,
---                json_build_object(),        -- ? how to record status change for all atransactiojns?
---                now());
 
 
 
@@ -377,11 +356,6 @@ AS $$
     END;
 $$;
 
-
-
--- Refresh fraud dashboard
--- refresh_fraud_dashboard()
--- procedure sgould refresh mv_daily_fraud_summary() stat  \\  triggered daily automatically (Scheduled Refresh via pg_cron)
 
 
 ---------------------------------------------------------------------------------------------------------------------------
@@ -573,6 +547,67 @@ AFTER UPDATE or INSERT or DELETE on accounts
 for each row
 execute function trg_func_log_audit();
 
+
+
+
+-- Customer Deletion Protection
+create or replace function trg_func_delete_protection()
+returns TRIGGER
+language plpgsql as $$
+    BEGIN
+        if old.customer_id in (select customer_id from accounts where status not in('closed')) then
+                RAISE EXCEPTION 'Cannot delete customer untill all accounts are closed';
+        end if;
+        return OLD;
+    END;
+$$;
+
+create trigger trg_delete_protection
+BEFORE DELETE on customers
+for each row
+execute function trg_func_delete_protection();
+
+
+
+
+
+
+
+
+
+--         -- +audit log freeze_acc
+--         INSERT INTO audit_log (
+--                                customer_id,
+--                                table_name,
+--                                operation,
+--                                old_value,
+--                                new_value,
+--                                changed_at)
+--         VALUES(
+--                v_customer_id,
+--                'cards',
+--                'UPDATE',
+--                json_build_object('status', v_account_status),
+--                json_build_object('status', 'blocked'),
+--                now()),
+--
+--                 (v_customer_id,
+--                'accounts',
+--                'UPDATE',
+--                json_build_object('status', v_card_status),
+--                json_build_object('status', 'suspended'),
+--                now()),
+--
+--              (v_customer_id,
+--                'transacions',
+--                'UPDATE',
+--                v_transaction_list,
+--                json_build_object(),        -- ? how to record status change for all atransactiojns?
+--                now());
+
+
+
+    -- ---------------------------------------
 --         INSERT INTO audit_log (
 --                                customer_id,
 --                                table_name,
@@ -594,26 +629,6 @@ execute function trg_func_log_audit();
 --                     'alert_status', 'open'),
 --                now()
 --               );
-
-
--- Customer Deletion Protection
-create or replace function trg_func_delete_protection()
-returns TRIGGER
-language plpgsql as $$
-    BEGIN
-        if old.customer_id in (select customer_id from accounts where status not in('closed')) then
-                RAISE EXCEPTION 'Cannot delete customer untill all accounts are closed';
-        end if;
-        return OLD;
-    END;
-$$;
-
-create trigger trg_delete_protection
-BEFORE DELETE on customers
-for each row
-execute function trg_func_delete_protection();
-
-
 
 
 
