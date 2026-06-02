@@ -1,4 +1,6 @@
 -- create DATABASE banking_fraud_track;
+-- DROP SCHEMA public CASCADE;
+-- CREATE SCHEMA public;
 
 ---------------------------------------------------------------------------------------------------------------------------
 -- +tbls w/ constraints
@@ -81,14 +83,6 @@ create table if not exists fraud_rules (
     is_active BOOLEAN not null
 );
 
--- thresholds
---  ('velocity' > 5,
---  'amount_limit'>10000,
---  'geo_block',
---  'merchant_block'
---  'unusual_pattern' > 5
---  high_overall_risk > 6))
-
 create table if not exists fraud_alerts (
     alert_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     transaction_id BIGINT not null,
@@ -164,7 +158,7 @@ create view vw_account_details as
         on c.country_code = cn.country_code;
 
 
--- transactions for last 30days  \\  +- other data?
+-- transactions for last 30days
 create view vw_recent_transactions AS
     select t.*,
            c.customer_id,
@@ -180,7 +174,7 @@ create view vw_recent_transactions AS
     where transaction_at >= now() - interval '30 days';
 
 
--- transactions w/ active fraud alerts ('open', 'under_review', 'escalated')  \\ +triggered rule
+-- transactions w/ active fraud alerts ('open', 'under_review')
 create view vw_flagged_transactions as
     select f.transaction_id,
            t.account_id,
@@ -289,11 +283,8 @@ create MATERIALIZED VIEW mv_daily_fraud_summary AS
 
 
 -- + refresh logic
-
-
-
-
-
+REFRESH MATERIALIZED VIEW mv_daily_fraud_summary;
+-- ...
 
 
 
