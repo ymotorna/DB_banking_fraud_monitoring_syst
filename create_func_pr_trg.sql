@@ -5,6 +5,7 @@
 
 -- Mask card number
 -- +domain for 1111 1111 1111 1111 -> 1111 **** **** 1111 formatting
+-- TBD: add trg to execute when user w/ certain rights [only read] get masked card + super-user get open card
 create domain secure_card_number as VARCHAR
 check (value ~'^\d{4}\*{8}\d{4}$');
 
@@ -574,6 +575,7 @@ execute function trg_func_delete_protection();
 
 
 
+-- TBD: 
 
 --         -- +audit log freeze_acc
 --         INSERT INTO audit_log (
