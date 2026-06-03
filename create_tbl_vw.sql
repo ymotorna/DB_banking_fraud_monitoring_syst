@@ -281,8 +281,8 @@ create MATERIALIZED VIEW mv_daily_fraud_summary AS
 
 
 
-
--- + refresh logic
+-- TBD: 
+-- + auto refresh logic
 REFRESH MATERIALIZED VIEW mv_daily_fraud_summary;
 -- ...
 
